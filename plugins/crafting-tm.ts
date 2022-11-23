@@ -10,12 +10,13 @@ declare module "mineflayer" {
             CraftCItem: (itemType: number, metadata?: number, count?: number, craftingTable?: false | Block) => Action;
             GetMissingItemsForItem: (itemType: number, metadata: number, count: number, craftingTable?: false | Block) => CraftingItem[][];
 
-            FindItem: (itemType: number, metadata?: number, count?: number) => Action;
+            FindItemInChests: (item: CraftingItem) => Action;
+            DumpItemInChests: (item: CraftingItem) => Action;
         }
     }
 }
 
-declare type CraftingItem = { id: number, m: number, count: number };
+declare type CraftingItem = { itemType: number, metadata: number, count: number };
 
 export function crafting(bot: Bot) {
     bot.crafting = {} as any;
@@ -35,7 +36,7 @@ export function crafting(bot: Bot) {
             else {
                 var craftingTree: CraftingItem[] = [];
 
-                let MissingItems: CraftingItem[] = [{ id: itemType, m: metadata, count: count }];
+                let MissingItems: CraftingItem[] = [{ itemType: itemType, metadata: metadata, count: count }];
                 let currentItemToCraft: CraftingItem;
 
                 for (let i = 0; i < 500; i++) {
@@ -43,7 +44,7 @@ export function crafting(bot: Bot) {
 
                     currentItemToCraft = MissingItems.pop();
 
-                    currentItemToCraft.count -= bot.inventory.count(currentItemToCraft.id, currentItemToCraft.m)
+                    currentItemToCraft.count -= bot.inventory.count(currentItemToCraft.itemType, currentItemToCraft.metadata)
                     if (currentItemToCraft.count <= 0) {
                         bot.debugU.EmitLog("CraftCItem", "Found item in inventory.")
                         continue;
@@ -53,9 +54,9 @@ export function crafting(bot: Bot) {
                         continue;
                     }
                     // An array of recipes
-                    const missing = bot.crafting.GetMissingItemsForItem(currentItemToCraft.id, currentItemToCraft.m, currentItemToCraft.count, craftingTable);
+                    const missing = bot.crafting.GetMissingItemsForItem(currentItemToCraft.itemType, currentItemToCraft.metadata, currentItemToCraft.count, craftingTable);
                     if (missing.length == 0) {
-                        bot.debugU.EmitError("CraftCItem", "No missing, error " + bot.mcData.items[currentItemToCraft.id].name)
+                        bot.debugU.EmitError("CraftCItem", "No missing, error " + bot.mcData.items[currentItemToCraft.itemType].name)
                         return;
                     }
                     craftingTree.push(currentItemToCraft)
@@ -67,7 +68,7 @@ export function crafting(bot: Bot) {
                 for (let i = 0; i < craftingTree.length; i++) {
                     const r = craftingTree[i];
                     tasks.push(async () => {
-                        const recipe = bot.recipesFor(r.id, r.m, 1, craftingTable)[0];
+                        const recipe = bot.recipesFor(r.itemType, r.metadata, 1, craftingTable)[0];
                         bot.debugU.EmitLog("CraftCItem", "Crafting...")
                         await bot.craft(recipe, Math.ceil(r.count / recipe["result"]["count"]), craftingTable ? craftingTable : null).catch(console.log)
                     });
@@ -88,20 +89,20 @@ export function crafting(bot: Bot) {
             })
         });
         const bestDeltas = recipeDeltas.sort((a, b) =>
-            b.map(e => bot.inventory.count(e.id, e.m) - e.count).reduce((e, f) => e + f) -
-            a.map(e => bot.inventory.count(e.id, e.m) - e.count).reduce((e, f) => e + f)
+            b.map(e => bot.inventory.count(e.itemType, e.metadata) - e.count).reduce((e, f) => e + f) -
+            a.map(e => bot.inventory.count(e.itemType, e.metadata) - e.count).reduce((e, f) => e + f)
         )
-        return bestDeltas.map(a => a.filter(b => bot.inventory.count(b.id, b.m) - b.count < 0));
+        return bestDeltas.map(a => a.filter(b => bot.inventory.count(b.itemType, b.metadata) - b.count < 0));
     }
 
-    bot.crafting.FindItem = (itemType, metadata, count) => {
+    bot.crafting.FindItemInChests = (item) => {
         return () => {
             const chests = bot.findBlocks({
                 matching: bot.mcData.blocksByName.chest.id,
                 count: 64
             }).reverse()
 
-            bot.taskManager.Insert("OpenChest", () => CheckChest(chests.length - 1, count))
+            bot.taskManager.Insert("OpenChest", () => CheckChest(chests.length - 1, item.count))
 
             function CheckChest(index: number, c: number) {
                 if (index < 0) return;
@@ -111,12 +112,12 @@ export function crafting(bot: Bot) {
                     const block = bot.blockAt(chests[index]);
                     if (block == null) return;
                     const chest = await bot.openChest(block)
-                    const ChestCount = Math.min(chest.containerCount(itemType, metadata), c);
-                    console.log(ChestCount, index, chest.containerCount(itemType, metadata))
+                    const ChestCount = Math.min(chest.containerCount(item.itemType, item.metadata), c);
+                    console.log(ChestCount, index, chest.containerCount(item.itemType, item.metadata))
 
                     if (ChestCount > 0) {
 
-                        await chest.withdraw(itemType, metadata, ChestCount);
+                        await chest.withdraw(item.itemType, item.metadata, ChestCount);
                         c -= ChestCount;
                         chest.close();
                         if (c <= 0) return;
@@ -129,7 +130,47 @@ export function crafting(bot: Bot) {
             }
         }
     }
+    bot.crafting.DumpItemInChests = (item) => {
+        return () => {
+            const chests = bot.findBlocks({
+                matching: bot.mcData.blocksByName.chest.id,
+                count: 64
+            }).reverse()
+
+            bot.taskManager.Insert("OpenChest", () => CheckChest(chests.length - 1, item.count))
+
+            function CheckChest(index: number, c: number) {
+                if (index < 0) return;
+
+                bot.taskManager.Insert("Open", async () => {
+
+                    const block = bot.blockAt(chests[index]);
+                    if (block == null) return;
+                    const chest = await bot.openChest(block);
+
+                    const itemData = bot.mcData.items[item.itemType];
+                    const itemCountInChest = chest.containerCount(item.itemType, item.metadata);
+                    const NotFullStackCount = itemCountInChest - Math.floor(itemCountInChest / itemData.stackSize) * itemData.stackSize;
+
+                    const ChestCount = Math.min(chest.emptySlotCount() * itemData.stackSize - NotFullStackCount, c);
+                    console.log(ChestCount, index)
+
+                    if (ChestCount > 0) {
+
+                        await chest.deposit(item.itemType, item.metadata, ChestCount);
+                        c -= ChestCount;
+                        chest.close();
+                        if (c <= 0) return;
+                    }
+
+                    chest.close();
+                    bot.taskManager.Insert("OpenChest", () => CheckChest(index - 1, c))
+                })
+                bot.taskManager.Insert("PathTo", bot.utility.PathTo(new goals.GoalLookAtBlock(chests[index], bot.world, {} as any), 20))
+            }
+        }
+    }
     function CanCraft(CI: CraftingItem, craftingTable: false | Block) {
-        return bot.recipesFor(CI.id, CI.m, 1, craftingTable).length > 0;
+        return bot.recipesFor(CI.itemType, CI.metadata, 1, craftingTable).length > 0;
     }
 }

@@ -319,9 +319,10 @@ export function utility(bot: Bot) {
         return async () => {
             let food = name == null ? null : bot.inventory.items().find(e => e.name == name);
             if (food == null) { // Find the best food in the bots inventory.
-                food = bot.inventory.items().filter(e =>
+                const foodArr = bot.inventory.items().filter(e =>
                     bot.utility.Foods.includes(e.name)
-                ).reduce((a, b) =>
+                )
+                if (foodArr.length > 0) food = foodArr.reduce((a, b) =>
                     bot.mcData.foods[a.type].foodPoints > bot.mcData.foods[b.type].foodPoints ? a : b
                 )
             }

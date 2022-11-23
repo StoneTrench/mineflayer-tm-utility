@@ -1,5 +1,6 @@
 import { Bot, Player } from "mineflayer";
 import { goals } from "mineflayer-pathfinder";
+import { Action } from "mineflayer-task-manager";
 import { Vec3 } from "vec3";
 import { MakeBot } from "..";
 import { Bots } from "../swarmManager";
@@ -54,7 +55,15 @@ const commands: Command[] = [
         let item = words[2];
 
         if (bot.mcData.itemsByName[item])
-            bot.qta(bot.crafting.FindItem(bot.mcData.itemsByName[item].id, null, count))
+            bot.qta(bot.crafting.FindItemInChests({ itemType: bot.mcData.itemsByName[item].id, metadata: null, count: count }));
+    }),
+    new Command([["dump"]]).setFunction((bot, player, words) => {
+        const items = bot.inventory.items().sort((a, b) => a.name.localeCompare(b.name));
+
+        for (let i = 0; i < items.length; i++) {
+            const e = items[i];
+            bot.taskManager.Add("Dump", bot.crafting.DumpItemInChests({ itemType: e.type, metadata: e.metadata, count: e.count }))
+        }
     }),
     new Command([["mine"]]).setFunction((bot, player, words) => {
         if (bot.username != Bots[0].username) return;
@@ -64,13 +73,13 @@ const commands: Command[] = [
         }
     }),
     new Command([["deforest"]]).setFunction((bot, player, words) => {
-        const trees = bot.deforest.FindTrees("jungle", 32);
+        const trees = bot.deforest.FindTrees(words[1] as any, 32);
         bot.qta(bot.deforest.CutDownTree(trees[0]));
     }),
-    new Command([["multiply"]]).setFunction((bot, player, words) => {
-        if (bot.username != Bots[0].username) return;
-        bot.qta(() => { MakeBot(words[1]) })
-    }),
+    // new Command([["multiply"]]).setFunction((bot, player, words) => {
+    //     if (bot.username != Bots[0].username) return;
+    //     bot.qta(() => { MakeBot(words[1]) })
+    // }),
     new Command([["collect"]]).setFunction((bot, player, words) => {
         if (bot.username != Bots[0].username) return;
         bot.qta(bot.utility.PickUpItems())
